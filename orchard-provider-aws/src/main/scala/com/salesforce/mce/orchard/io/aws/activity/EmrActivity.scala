@@ -109,6 +109,7 @@ object FakeStatus {
     def get(x: Int) = {
       if (x < 3) StepState.RUNNING
       else {
+        // StepState.COMPLETED
         throw new RuntimeException("exception: EmrActivity testing")
         StepState.CANCELLED
       }
