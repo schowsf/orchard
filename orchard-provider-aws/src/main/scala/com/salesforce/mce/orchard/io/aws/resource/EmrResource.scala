@@ -51,80 +51,85 @@ case class EmrResource(
       case Some(bas) => bas
     }
 
-    val response = Client
-      .emr()
-      .runJobFlow(
-        loggingUriBase
-          .foldLeft(
-            RunJobFlowRequest
-              .builder()
-              .name(name)
-              .releaseLabel(releaseLabel)
-              .applications(applications: _*)
-              .serviceRole(spec.serviceRole)
-              .jobFlowRole(spec.resourceRole)
-              .bootstrapActions(
-                unwrappedBootstrapActions.map { ba =>
-                  BootstrapActionConfig
-                    .builder()
-                    .name(s"bootstrap-action.${UUID.randomUUID()}")
-                    .scriptBootstrapAction(
-                      ScriptBootstrapActionConfig
-                        .builder()
-                        .path(ba.path)
-                        .args(ba.args: _*)
-                        .build()
-                    )
-                    .build()
-                }: _*
-              )
-              .tags(awsTags: _*)
-              .configurations(EmrResource.asConfigurations(spec.configurations): _*)
-              .instances {
-                val builder = JobFlowInstancesConfig
-                  .builder()
-                  .ec2SubnetId(instancesConfig.subnetId)
-                  .keepJobFlowAliveWhenNoSteps(true)
+//    val response = Client
+//      .emr()
+//      .runJobFlow(
+//        loggingUriBase
+//          .foldLeft(
+//            RunJobFlowRequest
+//              .builder()
+//              .name(name)
+//              .releaseLabel(releaseLabel)
+//              .applications(applications: _*)
+//              .serviceRole(spec.serviceRole)
+//              .jobFlowRole(spec.resourceRole)
+//              .bootstrapActions(
+//                unwrappedBootstrapActions.map { ba =>
+//                  BootstrapActionConfig
+//                    .builder()
+//                    .name(s"bootstrap-action.${UUID.randomUUID()}")
+//                    .scriptBootstrapAction(
+//                      ScriptBootstrapActionConfig
+//                        .builder()
+//                        .path(ba.path)
+//                        .args(ba.args: _*)
+//                        .build()
+//                    )
+//                    .build()
+//                }: _*
+//              )
+//              .tags(awsTags: _*)
+//              .configurations(EmrResource.asConfigurations(spec.configurations): _*)
+//              .instances {
+//                val builder = JobFlowInstancesConfig
+//                  .builder()
+//                  .ec2SubnetId(instancesConfig.subnetId)
+//                  .keepJobFlowAliveWhenNoSteps(true)
+//
+//                instancesConfig.instanceGroupConfigs
+//                  .foldLeft(builder) { case (b, instGroupConfigs) =>
+//                    b.instanceGroups(
+//                      instGroupConfigs.map { c =>
+//                        val builder = InstanceGroupConfig
+//                          .builder()
+//                          .name(s"orchard-${c.instanceRoleType}".toLowerCase)
+//                          .instanceRole(c.instanceRoleType)
+//                          .instanceCount(c.instanceCount)
+//                          .instanceType(c.instanceType)
+//
+//                        c.instanceBidPrice
+//                          .fold(builder.market(MarketType.ON_DEMAND))(p =>
+//                            if (lastAttempt && useOnDemandOnLastAttempt) {
+//                              builder.market(MarketType.ON_DEMAND)
+//                            } else {
+//                              builder.bidPrice(p).market(MarketType.SPOT)
+//                            }
+//                          )
+//
+//                        builder.build()
+//                      }: _*
+//                    )
+//                  }
+//
+//                instancesConfig.ec2KeyName
+//                  .foldLeft(builder)(_.ec2KeyName(_))
+//                instancesConfig.additionalMasterSecurityGroups
+//                  .foldLeft(builder)(_.additionalMasterSecurityGroups(_: _*))
+//                instancesConfig.additionalSlaveSecurityGroups
+//                  .foldLeft(builder)(_.additionalSlaveSecurityGroups(_: _*))
+//
+//                builder.build()
+//              }
+//          )((r, uri) => r.logUri(uri))
+//          .build()
+//      )
+//
+//    Json.toJson(EmrResource.InstSpec(response.jobFlowId()))
 
-                instancesConfig.instanceGroupConfigs
-                  .foldLeft(builder) { case (b, instGroupConfigs) =>
-                    b.instanceGroups(
-                      instGroupConfigs.map { c =>
-                        val builder = InstanceGroupConfig
-                          .builder()
-                          .name(s"orchard-${c.instanceRoleType}".toLowerCase)
-                          .instanceRole(c.instanceRoleType)
-                          .instanceCount(c.instanceCount)
-                          .instanceType(c.instanceType)
+    val fakeJobFlowId = scala.util.Random.nextDouble().toString.substring(3, 10)
+    println(s"fakeJobFlowId=${fakeJobFlowId}")
+    Json.toJson(EmrResource.InstSpec(fakeJobFlowId))
 
-                        c.instanceBidPrice
-                          .fold(builder.market(MarketType.ON_DEMAND))(p =>
-                            if (lastAttempt && useOnDemandOnLastAttempt) {
-                              builder.market(MarketType.ON_DEMAND)
-                            } else {
-                              builder.bidPrice(p).market(MarketType.SPOT)
-                            }
-                          )
-
-                        builder.build()
-                      }: _*
-                    )
-                  }
-
-                instancesConfig.ec2KeyName
-                  .foldLeft(builder)(_.ec2KeyName(_))
-                instancesConfig.additionalMasterSecurityGroups
-                  .foldLeft(builder)(_.additionalMasterSecurityGroups(_: _*))
-                instancesConfig.additionalSlaveSecurityGroups
-                  .foldLeft(builder)(_.additionalSlaveSecurityGroups(_: _*))
-
-                builder.build()
-              }
-          )((r, uri) => r.logUri(uri))
-          .build()
-      )
-
-    Json.toJson(EmrResource.InstSpec(response.jobFlowId()))
   }
 
   private def getStatus(spec: EmrResource.InstSpec) = {
@@ -158,14 +163,21 @@ case class EmrResource(
     .validate[EmrResource.InstSpec]
     .fold(
       invalid => Left(InvalidJsonException.raise(invalid)),
-      valid => getStatus(valid)
+      valid => Right(FakeStatus.get(valid))
     )
 
+  //  override def getStatus(instSpec: JsValue): Either[Throwable, Status.Value] = instSpec
+  //    .validate[EmrResource.InstSpec]
+  //    .fold(
+  //      invalid => Left(InvalidJsonException.raise(invalid)),
+  //      valid => getStatus(valid)
+  //    )
+
   private def terminate(spec: EmrResource.InstSpec) = {
-    Client
-      .emr()
-      .terminateJobFlows(TerminateJobFlowsRequest.builder().jobFlowIds(spec.clusterId).build())
-      .retry()
+    //    Client
+    //      .emr()
+    //      .terminateJobFlows(TerminateJobFlowsRequest.builder().jobFlowIds(spec.clusterId).build())
+    //      .retry()
 
     Status.Finished
   }
@@ -176,6 +188,28 @@ case class EmrResource(
       invalid => Left(InvalidJsonException.raise(invalid)),
       valid => Right(terminate(valid))
     )
+
+}
+
+object FakeStatus {
+  val m = scala.collection.mutable.Map.empty[String, Int]
+  def get(spec: EmrResource.InstSpec): Status.Value = {
+    m.get(spec.clusterId) match {
+      case Some(x) =>
+        logger.info(s"FakeStatus get ${spec.clusterId} x=$x")
+        m.update(spec.clusterId, x + 1)
+        get(x)
+      case None =>
+        m ++= Seq(spec.clusterId -> 0)
+        get(spec)
+    }
+  }
+
+  def get(x: Int) = {
+    if (x < 1) Status.Activating
+    else if (x < 3) Status.Running
+    else Status.Failed
+  }
 
 }
 
