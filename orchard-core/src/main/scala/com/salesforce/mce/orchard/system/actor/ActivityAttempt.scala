@@ -9,16 +9,15 @@ package com.salesforce.mce.orchard.system.actor
 
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext
-
 import akka.actor.typed._
 import akka.actor.typed.scaladsl._
 import play.api.libs.json.JsValue
-
 import com.salesforce.mce.orchard.db.{ActivityAttemptQuery, OrchardDatabase}
 import com.salesforce.mce.orchard.io.ActivityIO
 import com.salesforce.mce.orchard.model.Status
 import com.salesforce.mce.orchard.system.util.InvalidJsonException
 import com.salesforce.mce.orchard.db.ResourceInstanceQuery
+import sun.misc.Signal
 
 object ActivityAttempt {
 
@@ -254,6 +253,9 @@ object ActivityAttempt {
           s"ActivityAttempt running signal=$signal actorContext=${actorContext.self.toString}  "
         )
         // example 2023-08-23 02:45:40 GMT [error] c.s.m.o.s.a.ActivityAttempt$ - ActivityAttempt running signal=PostStop actorContext=Actor[akka://application/user/orchard-system/wf-c69a99cc-2c65-4745-a3ab-7b4e2e4a396d/act-06ed0d1d-cc30-4ac3-b3a9-e671fb60d30c/attempt-1#-1861749921]
+        if (signal == PostStop) {
+          ps.activityMgr ! ActivityMgr.AttemptFinished(Status.Failed)
+        }
         Behaviors.same
       }
   }
