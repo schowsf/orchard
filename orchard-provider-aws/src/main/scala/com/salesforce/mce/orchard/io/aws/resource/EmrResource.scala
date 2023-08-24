@@ -126,6 +126,7 @@ case class EmrResource(
 //
 //    Json.toJson(EmrResource.InstSpec(response.jobFlowId()))
 
+//    throw new RuntimeException(s"EmrResource testing, throw exception")
     val fakeJobFlowId = scala.util.Random.nextDouble().toString.substring(3, 10)
     println(s"fakeJobFlowId=${fakeJobFlowId}")
     Json.toJson(EmrResource.InstSpec(fakeJobFlowId))
