@@ -22,75 +22,72 @@ case class EmrActivity(name: String, steps: Seq[EmrActivity.Step], clusterId: St
     extends ActivityIO {
 
   override def create(): Either[Throwable, JsValue] = retryToEither {
-//    val response = Client
-//      .emr()
-//      .addJobFlowSteps(
-//        AddJobFlowStepsRequest
-//          .builder()
-//          .jobFlowId(clusterId)
-//          .steps(
-//            steps.map { step =>
-//              StepConfig
-//                .builder()
-//                .name(name)
-//                .actionOnFailure(ActionOnFailure.CONTINUE)
-//                .hadoopJarStep(
-//                  HadoopJarStepConfig
-//                    .builder()
-//                    .jar(step.jar)
-//                    .args(step.args: _*)
-//                    .build()
-//                )
-//                .build()
-//            }.asJava
-//          )
-//          .build()
-//      )
-//
-//    val stepIds = response.stepIds().asScala
-//    Json.toJson(stepIds)
-    val stepIds: collection.mutable.Buffer[String] =
-      Seq(System.currentTimeMillis().toString).toBuffer
+    val response = Client
+      .emr()
+      .addJobFlowSteps(
+        AddJobFlowStepsRequest
+          .builder()
+          .jobFlowId(clusterId)
+          .steps(
+            steps.map { step =>
+              StepConfig
+                .builder()
+                .name(name)
+                .actionOnFailure(ActionOnFailure.CONTINUE)
+                .hadoopJarStep(
+                  HadoopJarStepConfig
+                    .builder()
+                    .jar(step.jar)
+                    .args(step.args: _*)
+                    .build()
+                )
+                .build()
+            }.asJava
+          )
+          .build()
+      )
+
+    val stepIds = response.stepIds().asScala
     Json.toJson(stepIds)
   }
 
-  private def getProgress(steps: Seq[String]) = {
-//    val client = Client.emr()
-//    val statuses = steps
-//      .map { stepId =>
-//        client
-//          .describeStep(DescribeStepRequest.builder().clusterId(clusterId).stepId(stepId).build())
-//          .step()
-//          .status()
-//          .state()
-//      }
-//      .retry()
-
-    val statuses = FakeStatus.get(steps)
-
-    if (statuses.forall(ss => ss == StepState.COMPLETED)) {
-      Status.Finished
-    } else if (statuses.contains(StepState.FAILED)) {
-      Status.Failed
-    } else if (statuses.contains(StepState.CANCELLED)) {
-      // when EMR cluster terminate with error, the StepState is CANCELLED, return Fail so new attempts could be made
-      Status.Failed
-    } else {
-      Status.Running
+  private def getProgress(steps: Seq[String]): Either[Throwable, Status.Value] = {
+    val client = Client.emr()
+    val statuses = retryToEither {
+      steps
+        .map { stepId =>
+          client
+            .describeStep(DescribeStepRequest.builder().clusterId(clusterId).stepId(stepId).build())
+            .step()
+            .status()
+            .state()
+        }
     }
 
+    statuses.map { ss =>
+      if (ss.forall(ss => ss == StepState.COMPLETED)) {
+        Status.Finished
+      } else if (ss.contains(StepState.FAILED)) {
+        Status.Failed
+      } else if (ss.contains(StepState.CANCELLED)) {
+        // when EMR cluster terminate with error, the StepState is CANCELLED, return Fail so new attempts could be made
+        Status.Failed
+      } else {
+        Status.Running
+      }
+    }
   }
 
   override def getProgress(spec: JsValue): Either[Throwable, Status.Value] = spec
     .validate[Seq[String]]
     .fold(
       invalid => Left(InvalidJsonException.raise(invalid)),
-      valid => Right(getProgress(valid))
+      valid => getProgress(valid)
     )
 
   private def terminate(steps: Seq[String]) = {
-//    val client = Client.emr()
-//    client.cancelSteps(CancelStepsRequest.builder().clusterId(clusterId).stepIds(steps: _*).build())
+    val client = Client.emr()
+    client.cancelSteps(CancelStepsRequest.builder().clusterId(clusterId).stepIds(steps: _*).build())
     Status.Canceled
   }
 
@@ -101,31 +98,6 @@ case class EmrActivity(name: String, steps: Seq[EmrActivity.Step], clusterId: St
       valid => Right(terminate(valid))
     )
 
-}
-
-object FakeStatus {
-  val m = scala.collection.mutable.Map.empty[String, Int]
-  def get(steps: Seq[String]): Seq[StepState] = {
-    def get(x: Int) = {
-      if (x < 3) StepState.RUNNING
-      else {
-        // StepState.COMPLETED
-        throw new RuntimeException("exception: EmrActivity testing")
-        StepState.CANCELLED
-      }
-    }
-    steps.map(a => {
-      m.get(a) match {
-        case Some(x) =>
-          println(s"EmrActivity FakeStatus get step=$a x=$x")
-          m.update(a, x + 1)
-          get(x)
-        case None =>
-          m ++= Seq(a -> 0)
-          get(0)
-      }
-    })
-  }
 }
 
 object EmrActivity {

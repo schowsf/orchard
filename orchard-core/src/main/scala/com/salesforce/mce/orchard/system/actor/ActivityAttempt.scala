@@ -9,9 +9,11 @@ package com.salesforce.mce.orchard.system.actor
 
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext
+
 import akka.actor.typed._
 import akka.actor.typed.scaladsl._
 import play.api.libs.json.JsValue
+
 import com.salesforce.mce.orchard.db.{ActivityAttemptQuery, OrchardDatabase}
 import com.salesforce.mce.orchard.io.ActivityIO
 import com.salesforce.mce.orchard.model.Status
@@ -19,8 +21,6 @@ import com.salesforce.mce.orchard.system.util.InvalidJsonException
 import com.salesforce.mce.orchard.db.ResourceInstanceQuery
 
 object ActivityAttempt {
-
-  val CheckProgressDelay = 10.seconds
 
   sealed trait Msg
   case object Cancel extends Msg
@@ -51,9 +51,10 @@ object ActivityAttempt {
     attemptId: Int,
     activityType: String,
     activitySpec: JsValue,
-    resourceId: String
+    resourceId: String,
+    checkProgressDelay: FiniteDuration
   ): Behavior[Msg] = Behaviors.setup { ctx =>
-    val attemptBehavior = Behaviors.withTimers { timers: TimerScheduler[Msg] =>
+    Behaviors.withTimers { timers =>
       ctx.log.info(s"Starting ActivityAttempt ${ctx.self}...")
       val query = new ActivityAttemptQuery(workflowId, activityId, attemptId)
 
@@ -83,7 +84,7 @@ object ActivityAttempt {
           if (attemptR.status == Status.Pending) database.sync(query.setWaiting())
           resourceMgr ! ResourceMgr.GetResourceInstSpec(rscInstSpecAdapter)
           ctx.log.info(s"${ctx.self} became waiting")
-          waiting(ps, resourceMgr, activityType, activitySpec)
+          waiting(ps, resourceMgr, activityType, activitySpec, checkProgressDelay)
         case Status.Running =>
           val resourceInstInfo = for {
             resourceInstAttempt <- attemptR.resourceInstanceAttempt
@@ -123,7 +124,8 @@ object ActivityAttempt {
                     ps,
                     resourceInst.instanceAttempt,
                     activityIO,
-                    attemptR.attemptSpec.get
+                    attemptR.attemptSpec.get,
+                    checkProgressDelay
                   )
                 }
               )
@@ -136,10 +138,6 @@ object ActivityAttempt {
           terminate(ps, sts)
       }
     }
-    // this is not needed, the default is SupervisorStrategy.stop.
-    // using SupervisorStrategy.restart may be bad, if same error continues, keep trying / stopping is futile.
-//    Behaviors.supervise(attemptBehavior).onFailure(SupervisorStrategy.stop)
-    attemptBehavior
 
   }
 
@@ -147,7 +145,8 @@ object ActivityAttempt {
     ps: Params,
     resourceMgr: ActorRef[ResourceMgr.Msg],
     activityType: String,
-    activitySpec: JsValue
+    activitySpec: JsValue,
+    checkProgressDelay: FiniteDuration
   ): Behavior[Msg] =
     Behaviors
       .receiveMessage[Msg] {
@@ -187,12 +186,12 @@ object ActivityAttempt {
                   terminate(ps, Status.Failed)
                 case Right((activityIO, attemptSpec)) =>
                   ps.database.sync(ps.query.setRunning(ps.resourceId, resourceInst, attemptSpec))
-                  running(ps, resourceInst, activityIO, attemptSpec)
+                  running(ps, resourceInst, activityIO, attemptSpec, checkProgressDelay)
               }
 
             // Resource not ready yet
             case Left(Status.Pending) =>
-              ps.timers.startSingleTimer(CheckProgress, CheckProgressDelay)
+              ps.timers.startSingleTimer(CheckProgress, checkProgressDelay)
               Behaviors.same
 
             // Resource down for unknown reason, cancel the activity?
@@ -208,9 +207,7 @@ object ActivityAttempt {
           Behaviors.same
       }
       .receiveSignal { case (actorContext, signal) =>
-        ps.ctx.log.error(
-          s"ActivityAttempt waiting signal=$signal actorContext=${actorContext.toString}"
-        )
+        ps.ctx.log.info(s"${actorContext.self} (waiting) received signal $signal")
         Behaviors.same
       }
 
@@ -218,9 +215,10 @@ object ActivityAttempt {
     ps: Params,
     resourceInstance: Int,
     activityIO: ActivityIO,
-    attemptSpec: JsValue
+    attemptSpec: JsValue,
+    checkProgressDelay: FiniteDuration
   ): Behavior[Msg] = {
-    ps.timers.startSingleTimer(CheckProgress, CheckProgressDelay)
+    ps.timers.startSingleTimer(CheckProgress, checkProgressDelay)
     Behaviors
       .receiveMessage[Msg] {
         case Cancel =>
@@ -246,16 +244,12 @@ object ActivityAttempt {
               ps.database.sync(ps.query.setTerminated(status, ""))
               terminate(ps, status)
             case Right(status) =>
-              ps.timers.startSingleTimer(CheckProgress, CheckProgressDelay)
+              ps.timers.startSingleTimer(CheckProgress, checkProgressDelay)
               Behaviors.same
           }
       }
       .receiveSignal { case (actorContext, signal) =>
-        // https://doc.akka.io/docs/akka/2.6/typed/fault-tolerance.html#the-prerestart-signal
-        ps.ctx.log.error(
-          s"ActivityAttempt running signal=$signal actorContext=${actorContext.self.toString}  "
-        )
-        // example 2023-08-23 02:45:40 GMT [error] c.s.m.o.s.a.ActivityAttempt$ - ActivityAttempt running signal=PostStop actorContext=Actor[akka://application/user/orchard-system/wf-c69a99cc-2c65-4745-a3ab-7b4e2e4a396d/act-06ed0d1d-cc30-4ac3-b3a9-e671fb60d30c/attempt-1#-1861749921]
+        ps.ctx.log.info(s"${actorContext.self} (running) received signal $signal")
         Behaviors.same
       }
   }
