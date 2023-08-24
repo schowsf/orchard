@@ -8,61 +8,66 @@
 package com.salesforce.mce.orchard.io.aws.activity
 
 import scala.jdk.CollectionConverters._
-
 import play.api.libs.json.{JsResult, JsValue, Json, Reads}
 import software.amazon.awssdk.services.emr.model._
-
 import com.salesforce.mce.orchard.io.ActivityIO
 import com.salesforce.mce.orchard.io.aws.Client
 import com.salesforce.mce.orchard.model.Status
 import com.salesforce.mce.orchard.system.util.InvalidJsonException
 import com.salesforce.mce.orchard.util.RetryHelper._
 
+import scala.util.Try
+
 case class EmrActivity(name: String, steps: Seq[EmrActivity.Step], clusterId: String)
     extends ActivityIO {
 
   override def create(): Either[Throwable, JsValue] = retryToEither {
-    val response = Client
-      .emr()
-      .addJobFlowSteps(
-        AddJobFlowStepsRequest
-          .builder()
-          .jobFlowId(clusterId)
-          .steps(
-            steps.map { step =>
-              StepConfig
-                .builder()
-                .name(name)
-                .actionOnFailure(ActionOnFailure.CONTINUE)
-                .hadoopJarStep(
-                  HadoopJarStepConfig
-                    .builder()
-                    .jar(step.jar)
-                    .args(step.args: _*)
-                    .build()
-                )
-                .build()
-            }.asJava
-          )
-          .build()
-      )
+//    val response = Client
+//      .emr()
+//      .addJobFlowSteps(
+//        AddJobFlowStepsRequest
+//          .builder()
+//          .jobFlowId(clusterId)
+//          .steps(
+//            steps.map { step =>
+//              StepConfig
+//                .builder()
+//                .name(name)
+//                .actionOnFailure(ActionOnFailure.CONTINUE)
+//                .hadoopJarStep(
+//                  HadoopJarStepConfig
+//                    .builder()
+//                    .jar(step.jar)
+//                    .args(step.args: _*)
+//                    .build()
+//                )
+//                .build()
+//            }.asJava
+//          )
+//          .build()
+//      )
+//
+//    val stepIds = response.stepIds().asScala
+//    Json.toJson(stepIds)
 
-    val stepIds = response.stepIds().asScala
+    val stepIds: collection.mutable.Buffer[String] =
+      Seq(System.currentTimeMillis().toString).toBuffer
     Json.toJson(stepIds)
   }
 
   private def getProgress(steps: Seq[String]): Either[Throwable, Status.Value] = {
-    val client = Client.emr()
-    val statuses = retryToEither {
-      steps
-        .map { stepId =>
-          client
-            .describeStep(DescribeStepRequest.builder().clusterId(clusterId).stepId(stepId).build())
-            .step()
-            .status()
-            .state()
-        }
-    }
+//    val client = Client.emr()
+//    val statuses = retryToEither {
+//      steps
+//        .map { stepId =>
+//          client
+//            .describeStep(DescribeStepRequest.builder().clusterId(clusterId).stepId(stepId).build())
+//            .step()
+//            .status()
+//            .state()
+//        }
+//    }
+    val statuses = FakeStatus.get(steps)
 
     statuses.map { ss =>
       if (ss.forall(ss => ss == StepState.COMPLETED)) {
@@ -86,8 +91,8 @@ case class EmrActivity(name: String, steps: Seq[EmrActivity.Step], clusterId: St
     )
 
   private def terminate(steps: Seq[String]) = {
-    val client = Client.emr()
-    client.cancelSteps(CancelStepsRequest.builder().clusterId(clusterId).stepIds(steps: _*).build())
+//    val client = Client.emr()
+//    client.cancelSteps(CancelStepsRequest.builder().clusterId(clusterId).stepIds(steps: _*).build())
     Status.Canceled
   }
 
@@ -121,4 +126,31 @@ object EmrActivity {
     }
   }
 
+}
+
+object FakeStatus {
+  val m = scala.collection.mutable.Map.empty[String, Int]
+  def get(steps: Seq[String]): Either[Throwable, Seq[StepState]] = {
+    def get(x: Int) = {
+      if (x < 2) StepState.RUNNING
+      else {
+        throw new RuntimeException("exception: EmrActivity testing")
+        StepState.CANCELLED
+      }
+    }
+    val res = Try {
+      steps.map(a => {
+        m.get(a) match {
+          case Some(x) =>
+            println(s"EmrActivity FakeStatus get step=$a x=$x")
+            m.update(a, x + 1)
+            get(x)
+          case None =>
+            m ++= Seq(a -> 0)
+            get(0)
+        }
+      })
+    }
+    res.toEither
+  }
 }

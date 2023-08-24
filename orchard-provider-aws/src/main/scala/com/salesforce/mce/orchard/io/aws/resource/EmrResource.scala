@@ -129,7 +129,6 @@ case class EmrResource(
     val fakeJobFlowId = scala.util.Random.nextDouble().toString.substring(3, 10)
     println(s"fakeJobFlowId=${fakeJobFlowId}")
     Json.toJson(EmrResource.InstSpec(fakeJobFlowId))
-
   }
 
   private def getStatus(spec: EmrResource.InstSpec) = {
@@ -188,28 +187,6 @@ case class EmrResource(
       invalid => Left(InvalidJsonException.raise(invalid)),
       valid => Right(terminate(valid))
     )
-
-}
-
-object FakeStatus {
-  val m = scala.collection.mutable.Map.empty[String, Int]
-  def get(spec: EmrResource.InstSpec): Status.Value = {
-    m.get(spec.clusterId) match {
-      case Some(x) =>
-        logger.info(s"FakeStatus get ${spec.clusterId} x=$x")
-        m.update(spec.clusterId, x + 1)
-        get(x)
-      case None =>
-        m ++= Seq(spec.clusterId -> 0)
-        get(spec)
-    }
-  }
-
-  def get(x: Int) = {
-    if (x < 1) Status.Activating
-    else if (x < 3) Status.Running
-    else Status.Failed
-  }
 
 }
 
@@ -295,5 +272,27 @@ object EmrResource {
         spec.useOnDemandOnLastAttempt.getOrElse(false)
       )
     }
+
+}
+
+object FakeStatus {
+  val m = scala.collection.mutable.Map.empty[String, Int]
+  def get(spec: EmrResource.InstSpec): Status.Value = {
+    m.get(spec.clusterId) match {
+      case Some(x) =>
+        logger.info(s"FakeStatus get ${spec.clusterId} x=$x")
+        m.update(spec.clusterId, x + 1)
+        get(x)
+      case None =>
+        m ++= Seq(spec.clusterId -> 0)
+        get(spec)
+    }
+  }
+
+  def get(x: Int) = {
+    if (x < 1) Status.Activating
+    else if (x < 2) Status.Running
+    else Status.Failed
+  }
 
 }
