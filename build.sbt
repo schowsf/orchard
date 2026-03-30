@@ -2,7 +2,7 @@ val slickVersion = "3.5.2"
 // make sure this is the same as the playWS's dependency
 val pekkoVersion = "1.0.3"
 val playJsonVersion = "3.0.6"
-val jacksonVersion = "2.18.5"
+val jacksonVersion = "2.18.6"
 val awsVersion = "2.41.+"
 val stubbornVersion = "3.1.0"
 val prometheusVersion = "0.16.0"
@@ -65,6 +65,14 @@ lazy val orchardCore = (project in file("orchard-core")).
       pekkoTestkit,
       logback % Test,
       stubbornArtifact
+    ),
+    dependencyOverrides ++= Seq(
+      // Force Jackson version for consistency across all modules
+      "com.fasterxml.jackson.core" % "jackson-core" % jacksonVersion,
+      "com.fasterxml.jackson.core" % "jackson-databind" % jacksonVersion,
+      "com.fasterxml.jackson.core" % "jackson-annotations" % jacksonVersion,
+      "com.fasterxml.jackson.datatype" % "jackson-datatype-jdk8" % jacksonVersion,
+      "com.fasterxml.jackson.datatype" % "jackson-datatype-jsr310" % jacksonVersion
     )
   )
 
@@ -106,6 +114,14 @@ lazy val orchardProviderAWS = (project in file("orchard-provider-aws")).
       awsSsm,
       awsSts,
       awsSns
+    ),
+    dependencyOverrides ++= Seq(
+      // Force Jackson version to match security requirements
+      "com.fasterxml.jackson.core" % "jackson-core" % jacksonVersion,
+      "com.fasterxml.jackson.core" % "jackson-databind" % jacksonVersion,
+      "com.fasterxml.jackson.core" % "jackson-annotations" % jacksonVersion,
+      "com.fasterxml.jackson.datatype" % "jackson-datatype-jdk8" % jacksonVersion,
+      "com.fasterxml.jackson.datatype" % "jackson-datatype-jsr310" % jacksonVersion
     )
   ).
   dependsOn(orchardCore)
